@@ -1,12 +1,13 @@
 import random
 import re
+
 import emoji
 from pydantic import BaseModel
-from astrbot.api.event import filter
+
 from astrbot import logger
+from astrbot.api.event import filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core import AstrBotConfig
-from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.message.components import (
     At,
     Face,
@@ -14,6 +15,7 @@ from astrbot.core.message.components import (
     Plain,
     Reply,
 )
+from astrbot.core.platform.astr_message_event import AstrMessageEvent
 
 
 class GroupState(BaseModel):
@@ -44,6 +46,7 @@ class BetterIOPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.conf = config
+        self.clean = config["clean_config"]
 
     @filter.on_decorating_result(priority=15)
     async def on_message(self, event: AstrMessageEvent):
@@ -86,26 +89,31 @@ class BetterIOPlugin(Star):
                 return
 
         # 过滤不支持的消息类型
-        if not all(isinstance(comp, (Plain, Image, Face)) for comp in chain):
+        if not all(isinstance(comp, Plain | Image | Face) for comp in chain):
             return
 
         # 清洗文本消息
         end_seg = chain[-1]
         if (
             isinstance(end_seg, Plain)
-            and len(end_seg.text) < self.conf["clean_text_length"]
+            and len(end_seg.text) < self.clean["clean_text_length"]
         ):
             # 清洗emoji
-            if self.conf["clean_emoji"]:
+            if self.clean["clean_emoji"]:
                 end_seg.text = emoji.replace_emoji(end_seg.text, replace="")
-            # 清洗标点符号
-            if self.conf["clean_punctuation"]:
-                end_seg.text = re.sub(self.conf["clean_punctuation"], "", end_seg.text)
             # 去除指定开头字符
-            if self.conf["remove_lead"]:
-                for remove_lead in self.conf["remove_lead"]:
+            if self.clean["remove_lead"]:
+                for remove_lead in self.clean["remove_lead"]:
                     if end_seg.text.startswith(remove_lead):
                         end_seg.text = end_seg.text[len(remove_lead) :]
+            # 去除指定结尾字符
+            if self.clean["remove_tail"]:
+                for remove_tail in self.clean["remove_tail"]:
+                    if end_seg.text.endswith(remove_tail):
+                        end_seg.text = end_seg.text[: -len(remove_tail)]
+            # 清洗标点符号
+            if self.clean["clean_punctuation"]:
+                end_seg.text = re.sub(self.clean["clean_punctuation"], "", end_seg.text)
 
         # 随机附加At,引用回复
         if event.get_platform_name() == "aiocqhttp":
@@ -122,4 +130,8 @@ class BetterIOPlugin(Star):
                 and isinstance(end_seg, Plain)
                 and end_seg.text.strip()
             ):
-                chain.insert(0, Reply(id=message_id))
+                if self.conf["enable_at_str"]:
+                    send_name = event.get_sender_name()
+                    end_seg.text = f"@{send_name} {end_seg.text}"
+                else:
+                    chain.insert(0, Reply(id=message_id))

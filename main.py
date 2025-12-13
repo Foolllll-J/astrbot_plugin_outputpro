@@ -62,9 +62,10 @@ class BetterIOPlugin(Star):
         g.last_mid = event.message_obj.message_id
 
         # 缓存 “昵称 -> QQ”
+        cache_name_num = 100 # 缓存数量默认100
         sender_id = event.get_sender_id()
         sender_name = event.get_sender_name()
-        if len(g.name_to_qq) >= 100:
+        if len(g.name_to_qq) >= cache_name_num:
             g.name_to_qq.popitem(last=False)  # FIFO 头删
         g.name_to_qq[sender_name] = sender_id
 
@@ -96,8 +97,8 @@ class BetterIOPlugin(Star):
         if self.conf["only_llm_result"] and not result.is_llm_result():
             return
 
+        tconf = self.conf["toobot"]
         # 拦截重复消息
-        iconf = self.conf["intercept"]
         if tconf["block_reread"] and msg in g.bot_msgs:
             event.set_result(event.plain_result(""))
             logger.info(f"已阻止LLM发送重复消息：{msg}")
@@ -105,7 +106,6 @@ class BetterIOPlugin(Star):
         g.bot_msgs.append(msg)
 
         # 拦截人机发言
-        tconf = self.conf["toobot"]
         if tconf["block_ai"]:
             for word in tconf["keywords"]:
                 if word in msg:
@@ -114,7 +114,8 @@ class BetterIOPlugin(Star):
                     return
 
         # 解析 At 消息
-        await self.parse_ats(chain, g)
+        if self.conf["parse_at"]:
+            await self.parse_ats(chain, g)
 
         # 清洗文本消息
         cconf = self.conf["clean"]

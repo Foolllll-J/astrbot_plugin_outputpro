@@ -83,7 +83,7 @@
             }
         }
     },
-    "parser_at": {
+    "parse_at": {
         "description": "解析假艾特",
         "type": "bool",
         "hint": "第四步：将消息中字符串式的假艾特转换成真艾特，包括：@username @id [at:username] [at:id] ,且忽略中英文和大小写",
@@ -92,7 +92,7 @@
     "clean": {
         "description": "文本清理配置",
         "type": "object",
-        "hint": "第四步：清理文本。注意清洗顺序：中括号内容 -> 小括号内容 -> 情绪标签 -> emoji -> 句首字符 -> 句尾字符 -> 整体清洗特殊符号",
+        "hint": "第五步：清理文本。注意清洗顺序：中括号内容 -> 小括号内容 -> 情绪标签 -> emoji -> 句首字符 -> 句尾字符 -> 整体清洗特殊符号",
         "items": {
             "text_threshold": {
                 "description": "文本清理长度阈值",
@@ -154,13 +154,13 @@
     "at_prob": {
         "description": "艾特概率",
         "type": "float",
-        "hint": "第五步：按概率艾特别人（仅aiocqhttp平台）。随机值小于此值 → 必须带 @；随机值大于此值 → 必须不带 @。设为 0 则关闭此功能。请提前关闭Astrbot自动的At功能",
+        "hint": "第六步：按概率艾特别人（仅aiocqhttp平台）。随机值小于此值 → 必须带 @；随机值大于此值 → 必须不带 @。设为 0 则关闭此功能。请提前关闭Astrbot自动的At功能",
         "default": 0.005
     },
     "smart_reply": {
         "description": "智能引用",
         "type": "bool",
-        "hint": "第六步：智能地引用消息（仅aiocqhttp平台）。当bot要回复的消息不是群里的最新消息时（被顶上去了），引用要回复的消息。 请提前关闭Astrbot自动的Reply功能",
+        "hint": "第七步：智能地引用消息（仅aiocqhttp平台）。当bot要回复的消息不是群里的最新消息时（被顶上去了），引用要回复的消息。 请提前关闭Astrbot自动的Reply功能",
         "default": true
     }
 }

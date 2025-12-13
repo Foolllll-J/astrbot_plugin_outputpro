@@ -181,7 +181,8 @@ class BetterIOPlugin(Star):
                 continue
 
             # 从后往前匹配，避免 insert 导致偏移
-            for m in reversed(list(self.at_regex.finditer(text))):
+            matches = list(self.at_regex.finditer(text))
+            for m in reversed(matches):
                 qq = (
                     m.group(1)  # [at:123]
                     or gstate.name_to_qq.get(m.group(2))  # [at:nick]

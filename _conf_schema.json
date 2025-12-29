@@ -405,7 +405,7 @@
                 "description": "开启自动分段回复",
                 "hint": "开启此功能前, 务必先关闭Astrbot的自带的分段回复功能",
                 "type": "bool",
-                "default": true
+                "default": false
             },
             "chars": {
                 "description": "触发分段的字符",

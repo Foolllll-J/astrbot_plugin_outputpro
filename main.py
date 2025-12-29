@@ -122,6 +122,7 @@ class OutputPlugin(Star):
         # 缓存最新消息ID
         g: GroupState = StateManager.get_group(gid)
         if self.conf["reply_threshold"] > 0 and sender_id != self_id:
+            # 使用按时间顺序的消息 ID 队列记录最近消息，用于后续判断机器人回复是否被后续消息顶上去
             g.msg_queue.append(event.message_obj.message_id)
 
         # 缓存 “昵称 -> QQ”, 为解析假艾特提供映射

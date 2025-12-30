@@ -219,7 +219,7 @@ class OutputPlugin(Star):
     async def _step_summary(
         self,
         event: AstrMessageEvent,
-        _chain: list[BaseMessageComponent],
+        chain: list[BaseMessageComponent],
         result: MessageEventResult,
     ) -> StepResult:
         """图片摘要（直接发送并中断流水线）"""
@@ -243,9 +243,9 @@ class OutputPlugin(Star):
     async def _step_error(
         self,
         event: AstrMessageEvent,
-        _chain: list[BaseMessageComponent],
+        chain: list[BaseMessageComponent],
         result: MessageEventResult,
-    ) -> bool | None:
+    ) -> StepResult:
         econf = self.conf.get("error", {})
         emode = econf.get("mode", "ignore")
 
@@ -262,20 +262,21 @@ class OutputPlugin(Star):
                     event.message_obj.group_id = ""
                     event.message_obj.sender.user_id = self.admin_id
                     logger.debug(f"已将消息发送目标改为管理员（{self.admin_id}）私聊")
+                    return False
                 else:
                     logger.warning("未配置管理员ID，无法转发错误信息")
 
             elif emode == "block":
                 event.set_result(event.plain_result(""))
                 logger.warning(f"已阻止发送报错提示：{msg}")
-                return False  # ⬅ 关键：终止后续 pipeline
+                return False
 
         return None
 
     async def _step_dedup(
         self,
         event: AstrMessageEvent,
-        _chain: list[BaseMessageComponent],
+        chain: list[BaseMessageComponent],
         result: MessageEventResult,
     ) -> StepResult:
         g: GroupState = StateManager.get_group(event.get_group_id())
@@ -335,7 +336,12 @@ class OutputPlugin(Star):
 
         return None
 
-    async def _step_tts(self, event, chain, _result) -> StepResult:
+    async def _step_tts(
+        self,
+        event: AstrMessageEvent,
+        chain: list[BaseMessageComponent],
+        result: MessageEventResult,
+    ) -> StepResult:
         if not isinstance(event, AiocqhttpMessageEvent):
             return None
 
@@ -361,7 +367,12 @@ class OutputPlugin(Star):
 
         return None
 
-    async def _step_t2i(self, _event, chain, _result) -> StepResult:
+    async def _step_t2i(
+        self,
+        event: AstrMessageEvent,
+        chain: list[BaseMessageComponent],
+        result: MessageEventResult,
+    ) -> StepResult:
         if not self.style:
             return None
 
@@ -378,27 +389,37 @@ class OutputPlugin(Star):
 
         return None
 
-    async def _step_reply(self, event, chain, _result) -> StepResult:
+    async def _step_reply(
+        self,
+        event: AstrMessageEvent,
+        chain: list[BaseMessageComponent],
+        result: MessageEventResult,
+    ) -> StepResult:
         if self.conf["reply"]["threshold"] <= 0:
             return None
 
-        if not all(isinstance(x, (Plain, Image, Face, At)) for x in chain):  # noqa: UP038
+        if not all(isinstance(x, Plain | Image | Face | At) for x in chain):
             return None
 
         g = StateManager.get_group(event.get_group_id())
         msg_id = event.message_obj.message_id
-
-        if msg_id not in g.msg_queue:
+        queue = g.msg_queue
+        if msg_id not in queue:
             return None
 
-        pushed = len(g.msg_queue) - g.msg_queue.index(msg_id) - 1
+        pushed = len(queue) - queue.index(msg_id) - 1
         if pushed >= self.conf["reply_threshold"]:
             chain.insert(0, Reply(id=msg_id))
-            g.msg_queue.clear()
+            queue.clear()
 
         return None
 
-    async def _step_forward(self, event, chain, _result) -> StepResult:
+    async def _step_forward(
+        self,
+        event: AstrMessageEvent,
+        chain: list[BaseMessageComponent],
+        result: MessageEventResult,
+    ) -> StepResult:
         if not isinstance(event, AiocqhttpMessageEvent):
             return None
         if not isinstance(chain[-1], Plain):
@@ -416,12 +437,22 @@ class OutputPlugin(Star):
         chain[:] = [nodes]
         return None
 
-    async def _step_recall(self, event, _chain, _result) -> StepResult:
+    async def _step_recall(
+        self,
+        event: AstrMessageEvent,
+        chain: list[BaseMessageComponent],
+        result: MessageEventResult,
+    ) -> StepResult:
         if isinstance(event, AiocqhttpMessageEvent):
             await self.recaller.send_and_recall(event)
         return None
 
-    async def _step_split(self, event, chain, _result) -> StepResult:
+    async def _step_split(
+        self,
+        event: AstrMessageEvent,
+        chain: list[BaseMessageComponent],
+        result: MessageEventResult,
+    ) -> StepResult:
         await self.splitter.split(event.unified_msg_origin, chain)
         return None
 

@@ -35,6 +35,6 @@ class TTSStep(BaseStep):
                 ctx.chain[:] = [Record.fromURL(audio)]
                 return StepResult(msg=f"已将文本消息{text[:10]}转化为语音消息")
             except Exception as e:
-                StepResult(ok=False, msg=str(e))
+                return StepResult(ok=False, msg=str(e))
 
         return StepResult()

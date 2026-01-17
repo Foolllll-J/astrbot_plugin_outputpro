@@ -135,17 +135,18 @@ class AtStep(BaseStep):
         # 未命中 → 清除所有 at
         elif not hit and has_at:
             new_chain = []
-            removed_ats = []
+            removed_at = ""
 
             for c in ctx.chain:
                 if isinstance(c, At):
-                    removed_ats.append(f"@{c.name}")
+                    removed_at = f"@{c.name}"
                     continue
 
                 if isinstance(c, Plain):
-                    for m in self.at_head_regex.finditer(c.text):
+                    m = self.at_head_regex.search(c.text)
+                    if m:
                         at_str = next(g for g in m.groups() if g is not None)
-                        removed_ats.append(f"@{at_str}")
+                        removed_at = f"@{at_str}"
 
                     c.text = self.at_head_regex.sub("", c.text, count=1).strip()
                     if not c.text:
@@ -154,6 +155,6 @@ class AtStep(BaseStep):
                 new_chain.append(c)
 
             ctx.chain[:] = new_chain
-            return StepResult(msg=f"已移除艾特：{' '.join(removed_ats)}")
+            return StepResult(msg=removed_at)
 
         return StepResult()

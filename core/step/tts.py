@@ -161,7 +161,7 @@ class TTSStep(BaseStep):
             relay_bot = self._get_qq_relay_bot()
             if relay_bot and self.cfg.group_id:
                 audio = await relay_bot.get_ai_record(
-                    character=self.cfg._character_id,
+                    character=self.cfg.character_id,
                     group_id=int(self.cfg.group_id),
                     text=text,
                 )

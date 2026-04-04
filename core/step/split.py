@@ -19,10 +19,181 @@ from ..model import OutContext, StepName, StepResult
 from .base import BaseStep
 
 INVISIBLE_CHAR_RE = re.compile(r"[\u200b\u200c\u200d\ufeff\u2060]+")
+KAOMOJI_PATTERN = re.compile(
+    r"("
+    r"[(\[\uFF08\u3010<]"
+    r"[^()\[\]\uFF08\uFF09\u3010\u3011<>]*?"
+    r"[^\u4e00-\u9fffA-Za-z0-9\s]"
+    r"[^()\[\]\uFF08\uFF09\u3010\u3011<>]*?"
+    r"[)\]\uFF09\u3011>]"
+    r")"
+    r"|"
+    r"([\u25b3\u25a6\u30fb\u89e6\u8805\u301c\u30ef\u7b2f\^><\u2267\u2665\uff5e\uff40\u7c32\u2764\u20ac\u304c\u5065\u279f\u2190\u25ba\u25c4\u2754]{2,15})"
+)
+SMART_SPLIT_BRACKET_RE = re.compile(r"[(\[\uFF08\u3010](?=.*[\u4e00-\u9fff]).*?[)\]\uFF09\u3011]")
+SMART_SPLIT_QUOTES = {
+    '"',
+    "'",
+    "\u201c",
+    "\u201d",
+    "\u2018",
+    "\u2019",
+    "\u300c",
+    "\u300d",
+    "\u300e",
+    "\u300f",
+}
+SMART_SPLIT_SEPARATORS = {"\uff0c", ",", " ", "\u3002", ";", "\n"}
 
 
 def _normalize_plain_text(text: str) -> str:
     return INVISIBLE_CHAR_RE.sub("", text or "")
+
+
+def _is_english_letter(char: str) -> bool:
+    return "a" <= char.lower() <= "z"
+
+
+def _is_chinese_char(char: str) -> bool:
+    return "\u4e00" <= char <= "\u9fff"
+
+
+def _protect_kaomoji(text: str) -> tuple[str, dict[str, str]]:
+    protected = text
+    placeholder_to_kaomoji: dict[str, str] = {}
+    matches = KAOMOJI_PATTERN.findall(text)
+
+    for idx, match in enumerate(matches):
+        kaomoji = match[0] or match[1]
+        if not kaomoji:
+            continue
+        placeholder = f"__OUTPUTPRO_KAOMOJI_{idx}__"
+        protected = protected.replace(kaomoji, placeholder, 1)
+        placeholder_to_kaomoji[placeholder] = kaomoji
+
+    return protected, placeholder_to_kaomoji
+
+
+def _recover_kaomoji(sentences: list[str], placeholder_to_kaomoji: dict[str, str]) -> list[str]:
+    recovered: list[str] = []
+    for sentence in sentences:
+        restored = sentence
+        for placeholder, kaomoji in placeholder_to_kaomoji.items():
+            restored = restored.replace(placeholder, kaomoji)
+        recovered.append(restored)
+    return recovered
+
+
+def _smart_split_sentences(text: str) -> list[str]:
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    text = re.sub(r"\n\s*([\uff0c\u3002\s])", r"\n\1", text)
+    text = re.sub(r"([\uff0c\u3002\s])\s*\n", r"\1\n", text)
+
+    text_len = len(text)
+    if text_len < 3:
+        return list(text) if random.random() < 0.01 else [text]
+
+    inside_quote = [False] * text_len
+    in_quote = False
+    current_quote_char = ""
+    for idx, ch in enumerate(text):
+        if ch in SMART_SPLIT_QUOTES:
+            if not in_quote:
+                in_quote = True
+                current_quote_char = ch
+            elif ch == current_quote_char or (
+                ch in {'"', "'"} and current_quote_char in {'"', "'"}
+            ):
+                in_quote = False
+                current_quote_char = ""
+            inside_quote[idx] = False
+        else:
+            inside_quote[idx] = in_quote
+
+    segments: list[tuple[str, str]] = []
+    current_segment = ""
+    idx = 0
+    while idx < len(text):
+        char = text[idx]
+        if char in SMART_SPLIT_SEPARATORS:
+            if inside_quote[idx]:
+                can_split = False
+            elif char == "\n":
+                can_split = True
+            else:
+                can_split = True
+                if idx > 0 and text[idx - 1] in {":", "\uff1a"}:
+                    can_split = False
+                if idx < len(text) - 1 and text[idx + 1] in {":", "\uff1a"}:
+                    can_split = False
+                if can_split and char == " " and 0 < idx < len(text) - 1:
+                    prev_char = text[idx - 1]
+                    next_char = text[idx + 1]
+                    prev_is_alnum = prev_char.isdigit() or _is_english_letter(prev_char)
+                    next_is_alnum = next_char.isdigit() or _is_english_letter(next_char)
+                    if prev_is_alnum and next_is_alnum:
+                        can_split = False
+
+            if can_split:
+                if current_segment:
+                    segments.append((current_segment, char))
+                elif char in {" ", "\n"}:
+                    segments.append(("", char))
+                current_segment = ""
+            else:
+                current_segment += char
+        else:
+            current_segment += char
+        idx += 1
+
+    if current_segment:
+        segments.append((current_segment, ""))
+
+    segments = [(content, sep) for content, sep in segments if content or sep]
+    if not segments:
+        return [text] if text else []
+
+    if text_len < 12:
+        split_strength = 0.2
+    elif text_len < 32:
+        split_strength = 0.6
+    else:
+        split_strength = 0.7
+    merge_probability = 1.0 - split_strength
+
+    merged_segments: list[tuple[str, str]] = []
+    idx = 0
+    while idx < len(segments):
+        current_content, current_sep = segments[idx]
+        if (
+            idx + 1 < len(segments)
+            and current_sep != "\n"
+            and random.random() < merge_probability
+            and current_content
+        ):
+            next_content, next_sep = segments[idx + 1]
+            if next_content:
+                merged_segments.append((current_content + current_sep + next_content, next_sep))
+            else:
+                merged_segments.append((current_content, next_sep))
+            idx += 2
+            continue
+        merged_segments.append((current_content, current_sep))
+        idx += 1
+
+    final_sentences = [content for content, _sep in merged_segments if content and content.strip()]
+    return final_sentences or ([text] if text else [])
+
+
+def _split_plain_text_maibot_style(text: str) -> list[str]:
+    protected_text, kaomoji_mapping = _protect_kaomoji(text)
+    cleaned_text = SMART_SPLIT_BRACKET_RE.sub("", protected_text)
+
+    if cleaned_text == "":
+        return ["\u545c\u5463"]
+
+    sentences = _smart_split_sentences(cleaned_text)
+    return _recover_kaomoji(sentences, kaomoji_mapping)
 
 
 def _is_leading_empty_segment(seg: "Segment") -> bool:
@@ -82,6 +253,13 @@ class SplitStep(BaseStep):
         if platform_name not in {"aiocqhttp", "telegram", "lark"}:
             return StepResult()
 
+        max_length = int(getattr(self.cfg, "max_length", 0) or 0)
+        if max_length > 0:
+            chain_length = self._get_chain_text_length(ctx.chain)
+            if chain_length > max_length:
+                logger.debug(f"[Splitter] 超过分段字数上限，跳过分段：len={chain_length}, limit={max_length}")
+                return StepResult()
+
         segments = self._split_chain(ctx.chain)
 
         # 后处理
@@ -131,7 +309,10 @@ class SplitStep(BaseStep):
                     ctx.event.unified_msg_origin,
                     MessageChain(send_comps),
                 )
-                delay = self._calc_delay(seg.text)
+                if bool(getattr(self.cfg, "smart_split", False)):
+                    delay = self._calc_smart_split_delay(seg.text)
+                else:
+                    delay = self._calc_delay(seg.text)
                 await asyncio.sleep(delay)
             except Exception as e:
                 logger.error(f"[Splitter] 发送分段 {i + 1} 失败: {e}")
@@ -144,6 +325,10 @@ class SplitStep(BaseStep):
             ctx.chain.extend(last_comps)
 
         return StepResult(msg="分段回复完成")
+
+    @staticmethod
+    def _get_chain_text_length(chain: list[BaseMessageComponent]) -> int:
+        return sum(len(comp.text) for comp in chain if isinstance(comp, Plain))
 
 
     def _calc_delay(self, text: str) -> float:
@@ -184,6 +369,22 @@ class SplitStep(BaseStep):
 
         return min(delay, cfg.max_delay_cap)
 
+    def _calc_smart_split_delay(self, text: str) -> float:
+        """MaiBot 风格的智能分段发送延迟"""
+        if not text:
+            return 0.0
+
+        stripped_text = text.strip()
+        chinese_chars = sum(_is_chinese_char(char) for char in text)
+        if chinese_chars == 1 and len(stripped_text) == 1:
+            return 1.2
+
+        total_time = 0.0
+        for char in text:
+            total_time += 0.3 if _is_chinese_char(char) else 0.15
+
+        return total_time
+
     def _wrap_plain_with_zwsp(
         self, comps: list[BaseMessageComponent]
     ) -> list[BaseMessageComponent]:
@@ -200,7 +401,6 @@ class SplitStep(BaseStep):
                 wrapped.append(comp)
         return wrapped
 
-
     def _split_chain(self, chain: list[BaseMessageComponent]) -> list[Segment]:
         """
         核心分段逻辑
@@ -208,6 +408,7 @@ class SplitStep(BaseStep):
         segments: list[Segment] = []
         current = Segment()
         exhausted = False
+        smart_split_enabled = bool(getattr(self.cfg, "smart_split", False))
 
         # Reply / At
         pending_prefix: list[BaseMessageComponent] = []
@@ -255,6 +456,20 @@ class SplitStep(BaseStep):
         def push(seg: Segment):
             nonlocal exhausted
             if not seg.components:
+                return
+
+            if smart_split_enabled:
+                count = self.cfg.max_count
+                if count > 0:
+                    if len(segments) < count:
+                        segments.append(seg)
+                        if len(segments) >= count:
+                            exhausted = True
+                    else:
+                        exhausted = True
+                        _append_to_tail(seg.components)
+                else:
+                    segments.append(seg)
                 return
 
             count = self.cfg.max_count
@@ -320,6 +535,17 @@ class SplitStep(BaseStep):
                     else:
                         _attach_pending(current)
                     _append_to_tail([Plain(text)])
+                    continue
+
+                if smart_split_enabled:
+                    split_parts = _split_plain_text_maibot_style(text)
+                    for idx, part in enumerate(split_parts):
+                        if not part:
+                            continue
+                        _attach_pending(current)
+                        current.append(Plain(part))
+                        if idx < len(split_parts) - 1:
+                            flush()
                     continue
 
                 stack: list[str] = []

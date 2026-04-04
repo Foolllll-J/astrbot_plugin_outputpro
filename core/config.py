@@ -192,11 +192,17 @@ class RecallConfig(ConfigNode):
 
 
 class SplitConfig(ConfigNode):
-    char_list: list[str]
-    """触发或参与消息拆分的字符集合"""
+    max_length: int
+    """分段字数上限，超过则不进行分段"""
 
     max_count: int
-    """最大拆分段数，超出部分合并到最后一段"""
+    """分段数量上限，超出部分合并到最后一段"""
+
+    smart_split: bool
+    """是否启用智能分段"""
+
+    char_list: list[str]
+    """触发或参与消息拆分的字符集合"""
 
     typing_cps: float
     """模拟打字速度（字/秒），6~10 更像真人"""
@@ -262,6 +268,13 @@ class SplitConfig(ConfigNode):
         return f"[{''.join(tokens)}]+"
 
 
+class TypoConfig(ConfigNode):
+    error_rate: float
+    tone_error_rate: float
+    word_replace_rate: float
+    correction_append_prob: float
+
+
 class PluginConfig(ConfigNode):
     pipeline: PipelineConfig
     summary: SummaryConfig
@@ -270,6 +283,7 @@ class PluginConfig(ConfigNode):
     at: AtConfig
     clean: CleanConfig
     replace: ReplaceConfig
+    typo: TypoConfig
     tts: TTSConfig
     t2i: T2IConfig
     reply: ReplyConfig

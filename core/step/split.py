@@ -84,7 +84,8 @@ def _recover_kaomoji(sentences: list[str], placeholder_to_kaomoji: dict[str, str
     return recovered
 
 
-def _smart_split_sentences(text: str) -> list[str]:
+def _smart_split_sentences(text: str, separators: set[str] | None = None) -> list[str]:
+    active_separators = separators or SMART_SPLIT_SEPARATORS
     text = re.sub(r"\n\s*\n+", "\n", text)
     text = re.sub(r"\n\s*([\uff0c\u3002\s])", r"\n\1", text)
     text = re.sub(r"([\uff0c\u3002\s])\s*\n", r"\1\n", text)
@@ -115,7 +116,7 @@ def _smart_split_sentences(text: str) -> list[str]:
     idx = 0
     while idx < len(text):
         char = text[idx]
-        if char in SMART_SPLIT_SEPARATORS:
+        if char in active_separators:
             if inside_quote[idx]:
                 can_split = False
             elif char == "\n":
@@ -185,14 +186,14 @@ def _smart_split_sentences(text: str) -> list[str]:
     return final_sentences or ([text] if text else [])
 
 
-def _split_plain_text_maibot_style(text: str) -> list[str]:
+def _split_plain_text_maibot_style(text: str, separators: set[str] | None = None) -> list[str]:
     protected_text, kaomoji_mapping = _protect_kaomoji(text)
     cleaned_text = SMART_SPLIT_BRACKET_RE.sub("", protected_text)
 
     if cleaned_text == "":
         return ["\u545c\u5463"]
 
-    sentences = _smart_split_sentences(cleaned_text)
+    sentences = _smart_split_sentences(cleaned_text, separators=separators)
     return _recover_kaomoji(sentences, kaomoji_mapping)
 
 
@@ -309,10 +310,7 @@ class SplitStep(BaseStep):
                     ctx.event.unified_msg_origin,
                     MessageChain(send_comps),
                 )
-                if bool(getattr(self.cfg, "smart_split", False)):
-                    delay = self._calc_smart_split_delay(seg.text)
-                else:
-                    delay = self._calc_delay(seg.text)
+                delay = self._calc_smart_split_delay(seg.text)
                 await asyncio.sleep(delay)
             except Exception as e:
                 logger.error(f"[Splitter] 发送分段 {i + 1} 失败: {e}")
@@ -329,43 +327,14 @@ class SplitStep(BaseStep):
     @staticmethod
     def _get_chain_text_length(chain: list[BaseMessageComponent]) -> int:
         return sum(len(comp.text) for comp in chain if isinstance(comp, Plain))
-    def _calc_delay(self, text: str) -> float:
-        """计算延迟(拟人打字)"""
-        if not text:
-            return 0.0
 
-        cfg = self.cfg
-        n = len(text)
-        base_char_time = 1.0 / max(cfg.typing_cps, 1e-3)
-
-        jitter = random.uniform(
-            1.0 - cfg.typing_jitter,
-            1.0 + cfg.typing_jitter,
-        )
-        char_time = base_char_time * jitter
-        char_time = min(max(char_time, 0.02), 0.20)
-
-        delay = n * char_time
-
-        # 标点 / 换行停顿
-        delay += (
-            text.count("，") * 0.06
-            + text.count("。") * 0.18
-            + text.count("！") * 0.14
-            + text.count("？") * 0.16
-            + text.count("…") * 0.22
-            + text.count("\n") * 0.35
-        )
-
-        # 短停顿
-        if random.random() < cfg.pause_prob:
-            delay += random.uniform(*cfg.pause_range)
-
-        # 长停顿（少量）
-        if random.random() < cfg.long_pause_prob:
-            delay += random.uniform(*cfg.long_pause_range)
-
-        return min(delay, cfg.max_delay_cap)
+    def _get_smart_split_separators(self) -> set[str]:
+        separators = set(SMART_SPLIT_SEPARATORS)
+        for token in getattr(self.cfg, "extra_separators", []) or []:
+            text = str(token or "").strip()
+            if text:
+                separators.add(text[0])
+        return separators
 
     def _calc_smart_split_delay(self, text: str) -> float:
         """MaiBot 风格的智能分段发送延迟"""
@@ -403,11 +372,10 @@ class SplitStep(BaseStep):
         """
         核心分段逻辑
         """
+        smart_split_separators = self._get_smart_split_separators()
         segments: list[Segment] = []
         current = Segment()
         exhausted = False
-        smart_split_enabled = bool(getattr(self.cfg, "smart_split", False))
-
         # Reply / At
         pending_prefix: list[BaseMessageComponent] = []
 
@@ -454,20 +422,6 @@ class SplitStep(BaseStep):
         def push(seg: Segment):
             nonlocal exhausted
             if not seg.components:
-                return
-
-            if smart_split_enabled:
-                count = self.cfg.max_count
-                if count > 0:
-                    if len(segments) < count:
-                        segments.append(seg)
-                        if len(segments) >= count:
-                            exhausted = True
-                    else:
-                        exhausted = True
-                        _append_to_tail(seg.components)
-                else:
-                    segments.append(seg)
                 return
 
             count = self.cfg.max_count
@@ -545,79 +499,17 @@ class SplitStep(BaseStep):
                     _append_to_tail([Plain(text)])
                     continue
 
-                if smart_split_enabled:
-                    split_parts = _split_plain_text_maibot_style(text)
-                    for idx, part in enumerate(split_parts):
-                        if not part:
-                            continue
-                        _attach_pending(current)
-                        current.append(Plain(part))
-                        if idx < len(split_parts) - 1:
-                            flush()
-                    continue
-
-                stack: list[str] = []
-                pattern = self.cfg.split_re
-                i = 0
-                n = len(text)
-                buf = ""
-
-                while i < n:
-                    ch = text[i]
-                    is_opener = ch in self.cfg.pair_map
-
-                    if ch in self.cfg.quote_chars:
-                        if stack and stack[-1] == ch:
-                            stack.pop()
-                        else:
-                            stack.append(ch)
-                        buf += ch
-                        i += 1
+                split_parts = _split_plain_text_maibot_style(
+                    text,
+                    separators=smart_split_separators,
+                )
+                for idx, part in enumerate(split_parts):
+                    if not part:
                         continue
-
-                    if stack:
-                        expected_closer = self.cfg.pair_map.get(stack[-1])
-                        if ch == expected_closer:
-                            stack.pop()
-                        elif is_opener:
-                            stack.append(ch)
-                        buf += ch
-                        i += 1
-                        continue
-
-                    if is_opener:
-                        stack.append(ch)
-                        buf += ch
-                        i += 1
-                        continue
-
-                    m = pattern.match(text, i)
-                    if m:
-                        delim = m.group()
-
-                        if not buf and not current.components:
-                            i += len(delim)
-                            continue
-
-                        buf += delim
-                        if buf:
-                            _attach_pending(current)
-                            current.append(Plain(buf))
-                            flush()
-                            buf = ""
-                            if exhausted:
-                                remaining = text[i + len(delim) :]
-                                if remaining:
-                                    _append_to_tail([Plain(remaining)])
-                                break
-                        i += len(delim)
-                    else:
-                        buf += ch
-                        i += 1
-
-                if buf and not exhausted:
                     _attach_pending(current)
-                    current.append(Plain(buf))
+                    current.append(Plain(part))
+                    if idx < len(split_parts) - 1:
+                        flush()
                 continue
 
             # Image / Face

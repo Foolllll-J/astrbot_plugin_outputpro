@@ -335,32 +335,8 @@ class TypoStep(BaseStep):
     def _resolve_append_separator(self, ctx: OutContext) -> str | None:
         if not self._split_will_run_for_context(ctx):
             return None
+        return "\n"
 
-        split_cfg = self.plugin_config.split
-        if bool(getattr(split_cfg, "smart_split", False)):
-            return "\n"
-
-        raw_char_list = getattr(split_cfg, "char_list", []) or []
-        if "\\n" in raw_char_list:
-            return "\n"
-        if "\\s" in raw_char_list:
-            return " "
-
-        for token in raw_char_list:
-            if not token or token in {"\\n", "\\s"}:
-                continue
-            return token[0]
-
-        return None
-
-    def _process_sentence(self, sentence: str, *, append_separator: str | None) -> list[str]:
-        generator = self._get_typo_generator()
-        typoed_text, typo_corrections = generator.create_typo_sentence(sentence)
-        if typo_corrections:
-            if append_separator and random.random() < self.cfg.correction_append_prob:
-                return [typoed_text, typo_corrections]
-            return [typoed_text]
-        return [typoed_text]
 
     @staticmethod
     def _get_chain_text_length(chain: list[Plain]) -> int:

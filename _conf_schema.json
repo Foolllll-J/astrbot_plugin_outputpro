@@ -21,6 +21,7 @@
                     "at(解析艾特)",
                     "clean(文本清洗)",
                     "replace(文本替换)",
+                    "typo(错字模拟)",
                     "tts(文转语音)",
                     "t2i(文转图片)",
                     "reply(智能引用)",
@@ -35,6 +36,7 @@
                     "at(解析艾特)",
                     "clean(文本清洗)",
                     "replace(文本替换)",
+                    "typo(错字模拟)",
                     "tts(文转语音)",
                     "t2i(文转图片)",
                     "reply(智能引用)",
@@ -54,6 +56,7 @@
                     "at(解析艾特)",
                     "clean(文本清洗)",
                     "replace(文本替换)",
+                    "typo(错字模拟)",
                     "tts(文转语音)",
                     "t2i(文转图片)",
                     "reply(智能引用)",
@@ -66,6 +69,7 @@
                     "at(解析艾特)",
                     "clean(文本清洗)",
                     "replace(文本替换)",
+                    "typo(错字模拟)",
                     "tts(文转语音)",
                     "reply(智能引用)",
                     "split(分段回复)"
@@ -302,6 +306,42 @@
             }
         }
     },
+    "typo": {
+        "description": "【错字模拟】",
+        "hint": "对中文文本生成概率性同音错字，支持整词替换、单字替换、声调错误与纠正提示",
+        "type": "object",
+        "items": {
+            "error_rate": {
+                "description": "单字替换概率",
+                "hint": "控制单个汉字尝试替换为同音错字的概率",
+                "type": "float",
+                "default": 0.01
+            },
+            "tone_error_rate": {
+                "description": "声调错误概率",
+                "hint": "控制在同音字检索时引入错误声调候选的概率",
+                "type": "float",
+                "default": 0.1
+            },
+            "word_replace_rate": {
+                "description": "整词替换概率",
+                "hint": "控制多字词语整体替换为高频同音词的概率",
+                "type": "float",
+                "default": 0.006
+            },
+            "correction_append_prob": {
+                "description": "追加纠正概率",
+                "hint": "生成错字时，按此概率在下一段附上“正确字/词”提示；否则只输出错句",
+                "type": "float",
+                "slider": {
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.01
+                },
+                "default": 0.5
+            }
+        }
+    },
     "tts": {
         "description": "【文转语音】",
         "type": "object",
@@ -512,51 +552,36 @@
     },
     "split": {
         "description": "【分段回复】",
-        "hint": "将一条长消息拆分为多段后依次发送",
+        "hint": "将一条长消息按智能分段逻辑拆分为多段后依次发送",
         "type": "object",
         "items": {
-            "char_list": {
-                "description": "触发分段的字符",
-                "hint": "当文本命中这些字符时触发分段（换行为 \\n，空格为 \\s），如：，。？！\\n。注意：括号/引号等成对符号内部不会触发分段",
-                "type": "list",
-                "default": [
-                    "。",
-                    "？",
-                    "\\n"
-                ]
-            },
-            "max_count": {
-                "description": "最大分段数",
-                "hint": "超过此数量则不再分段",
-                "type": "int",
-                "slider": {
-                    "min": 1,
-                    "max": 5,
-                    "step": 1
-                },
-                "default": 2
-            },
-            "typing_cps": {
-                "description": "打字速度",
-                "type": "float",
-                "hint": "模拟打字速度（字/秒），6~10 更像真人。延迟时间（秒）≈ 字数 / 打字速度",
-                "slider": {
-                    "min": 1,
-                    "max": 20,
-                    "step": 1
-                },
-                "default": 8
-            },
-            "max_delay_cap": {
-                "description": "最大延迟",
-                "hint": "对于超长文本，算得的延迟时间超过最大延迟时间时，采用最大延迟时间进行延迟",
+            "max_length": {
+                "description": "分段字数上限",
+                "hint": "消息字数超过该值时不进行分段；设为 0 表示不限制",
                 "type": "int",
                 "slider": {
                     "min": 0,
-                    "max": 10,
+                    "max": 300,
                     "step": 1
                 },
-                "default": 5
+                "default": 0
+            },
+            "max_count": {
+                "description": "分段数量上限",
+                "hint": "分段生成的段数超过此数量时，超出部分将合并到最后一段",
+                "type": "int",
+                "slider": {
+                    "min": 1,
+                    "max": 8,
+                    "step": 1
+                },
+                "default": 3
+            },
+            "extra_separators": {
+                "description": "额外分段符",
+                "hint": "如有特殊需求，可填写额外的单字符分段符。多字符项只取首字符",
+                "type": "list",
+                "default": []
             }
         }
     }

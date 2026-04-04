@@ -17,6 +17,7 @@ from .step import (
     SplitStep,
     SummaryStep,
     T2IStep,
+    TypoStep,
     TTSStep,
 )
 
@@ -38,6 +39,7 @@ class Pipeline:
         ("at", AtStep),
         ("clean", CleanStep),
         ("replace", ReplaceStep),
+        ("typo", TypoStep),
         ("tts", TTSStep),
         ("t2i", T2IStep),
         ("reply", ReplyStep),

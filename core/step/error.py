@@ -20,17 +20,20 @@ class ErrorStep(BaseStep):
         self.admins_id = config.admins_id
 
     def _find_hit_keyword(self, text: str) -> str | None:
+        """
+        在文本中查找是否包含任一报错关键词，返回第一个匹配的关键词
+        """
         for word in self.cfg.keywords:
             if word in text:
                 return word
         return None
 
-    async def _forward_to_admin(self, ctx: OutContext) -> str:
+    async def _forward_to_admin(self, ctx: OutContext, error_report: str) -> str:
         """
         转发消息给设定的会话
         返回反馈信息（字符串）
         """
-        chain = MessageChain([Plain(ctx.plain)])
+        chain = MessageChain([Plain(error_report)])
         context = self.plugin_config.context
 
         if self.cfg.forward_umo == "admin":
@@ -70,9 +73,15 @@ class ErrorStep(BaseStep):
             return StepResult()
 
         msg = f"命中报错关键词 {hit_word}"
-
+        error_report = (
+            f"来自群：{ctx.gid}\n"
+            f"用户：{ctx.uid}\n"
+            f"用户输入：{ctx.event.message_str}\n"
+            f"关键词：{hit_word}\n"
+            f"报错原文：{ctx.plain}"
+        )
         if self.cfg.forward_umo:
-            forward_msg = await self._forward_to_admin(ctx)
+            forward_msg = await self._forward_to_admin(ctx, error_report)
             msg += f"，{forward_msg}"
 
         ctx.event.set_result(ctx.event.plain_result(self.cfg.custom_msg))

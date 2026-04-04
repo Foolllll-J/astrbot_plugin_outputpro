@@ -12,7 +12,7 @@ import jieba
 from pypinyin import Style, pinyin
 
 from astrbot.api import logger
-from astrbot.core.message.components import Plain
+from astrbot.core.message.components import BaseMessageComponent, Plain
 
 from ..config import PluginConfig
 from ..model import OutContext, StepName, StepResult
@@ -268,13 +268,12 @@ class ChineseTypoGenerator:
             result.append("".join(word_result))
 
         correction_suggestion = None
-        if random.random() < 0.5:
-            if word_typos:
-                _wrong_word, correct_word = random.choice(word_typos)
-                correction_suggestion = correct_word
-            elif char_typos:
-                _wrong_char, correct_char = random.choice(char_typos)
-                correction_suggestion = correct_char
+        if word_typos:
+            _wrong_word, correct_word = random.choice(word_typos)
+            correction_suggestion = correct_word
+        elif char_typos:
+            _wrong_char, correct_char = random.choice(char_typos)
+            correction_suggestion = correct_char
 
         return "".join(result), correction_suggestion
 
@@ -310,17 +309,28 @@ class TypoStep(BaseStep):
             )
         return self._typo_generator
 
-    def _split_will_run_for_context(self, ctx: OutContext) -> bool:
+    @staticmethod
+    def _split_platform_supported(ctx: OutContext) -> bool:
+        return ctx.event.get_platform_name() in {"aiocqhttp", "telegram", "lark"}
+
+    def _split_will_run_for_chain(
+        self, ctx: OutContext, chain: list[BaseMessageComponent]
+    ) -> bool:
         pipeline_cfg = self.plugin_config.pipeline
         if not pipeline_cfg.is_enabled_step(StepName.SPLIT):
             return False
         if pipeline_cfg.is_llm_step(StepName.SPLIT) and not ctx.is_llm:
             return False
+        if not self._split_platform_supported(ctx):
+            return False
         split_cfg = self.plugin_config.split
         max_length = int(getattr(split_cfg, "max_length", 0) or 0)
-        if max_length > 0 and self._get_chain_text_length(ctx.chain) > max_length:
+        if max_length > 0 and self._get_chain_text_length(chain) > max_length:
             return False
         return True
+
+    def _split_will_run_for_context(self, ctx: OutContext) -> bool:
+        return self._split_will_run_for_chain(ctx, ctx.chain)
 
     def _resolve_append_separator(self, ctx: OutContext) -> str | None:
         if not self._split_will_run_for_context(ctx):
@@ -356,9 +366,59 @@ class TypoStep(BaseStep):
     def _get_chain_text_length(chain: list[Plain]) -> int:
         return sum(len(seg.text) for seg in chain if isinstance(seg, Plain))
 
+    def _build_preview_chain(
+        self,
+        ctx: OutContext,
+        target_seg: Plain,
+        replacement_text: str,
+    ) -> list[BaseMessageComponent]:
+        preview_chain: list[BaseMessageComponent] = []
+        for comp in ctx.chain:
+            if comp is target_seg:
+                preview_chain.append(Plain(replacement_text))
+            elif isinstance(comp, Plain):
+                preview_chain.append(Plain(comp.text))
+            else:
+                preview_chain.append(comp)
+        return preview_chain
+
+    def _should_append_correction(
+        self,
+        ctx: OutContext,
+        target_seg: Plain,
+        *,
+        typoed_text: str,
+        correction_text: str,
+        append_separator: str | None,
+    ) -> bool:
+        if not append_separator or not correction_text:
+            return False
+
+        preview_text = append_separator.join([typoed_text, correction_text])
+        preview_chain = self._build_preview_chain(ctx, target_seg, preview_text)
+        if not self._split_will_run_for_chain(ctx, preview_chain):
+            return False
+
+        from .split import SplitStep
+
+        split_step = SplitStep(self.plugin_config)
+        preview_segments = split_step._split_chain(preview_chain)
+        if len(preview_segments) <= 1:
+            return False
+
+        correction_text = correction_text.strip()
+        for seg in preview_segments[1:]:
+            seg_text = "".join(
+                comp.text for comp in seg.components if isinstance(comp, Plain)
+            ).strip()
+            if seg_text == correction_text:
+                return True
+        return False
+
     async def handle(self, ctx: OutContext) -> StepResult:
         changed_count = 0
         append_separator = self._resolve_append_separator(ctx)
+        generator = self._get_typo_generator()
 
         for seg in ctx.chain:
             if not isinstance(seg, Plain):
@@ -366,10 +426,17 @@ class TypoStep(BaseStep):
             if not seg.text or not seg.text.strip():
                 continue
 
-            processed_parts = self._process_sentence(
-                seg.text,
-                append_separator=append_separator,
-            )
+            typoed_text, typo_corrections = generator.create_typo_sentence(seg.text)
+            processed_parts = [typoed_text]
+            if typo_corrections and random.random() < self.cfg.correction_append_prob:
+                if self._should_append_correction(
+                    ctx,
+                    seg,
+                    typoed_text=typoed_text,
+                    correction_text=typo_corrections,
+                    append_separator=append_separator,
+                ):
+                    processed_parts.append(typo_corrections)
             separator = append_separator or ""
             new_text = separator.join(part for part in processed_parts if part)
             if new_text and new_text != seg.text:
